@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <title>Glassy Social - Modern Social Media Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { font-family: 'Inter', sans-serif; }
+    .glass {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    .post-card {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(15px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.3s ease;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      transition: all 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="toast-container" style="position: fixed; top: 20px; right: 20px; z-index: 9999;"></div>
+
+  <script type="text/babel">
+    // ==========================
+    // Supabase Configuration
+    // ==========================
+    const supabaseUrl = 'https://rzbrlrkigfdwqrrlpbuq.supabase.co';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnJscmtpZ2Zkd3FycmxwYnVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzNTc0NTEsImV4cCI6MjA3MTkzMzQ1MX0.JLAlo06HXzNZeOlIB3Hla4kDDFutd2Jye8ImqWraNsM';
+    const { createClient } = supabase;
+    const supabaseClient = createClient(supabaseUrl, supabaseKey);
+
+    const { useState, useEffect, useContext, createContext, useRef } = React;
+
+    // ==========================
+    // Toast system (fixed template literal bug)
+    // ==========================
+    window.showToast = function(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500' };
+      toast.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg mb-2 transform transition-all duration-300 translate-x-full opacity-0`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.remove('translate-x-full', 'opacity-0');
+      }, 100);
+      setTimeout(() => {
+        toast.classList.add('translate-x-full', 'opacity-0');
+        setTimeout(() => container.removeChild(toast), 300);
+      }, 3000);
+    };
+
+    // ==========================
+    // Helpers
+    // ==========================
+    const fmtTime = (iso) => {
+      try {
+        const d = new Date(iso);
+        return d.toLocaleString();
+      } catch {
+        return 'Just now';
+      }
+    };
+
+    // ==========================
+    // Auth Context
+    // ==========================
+    const AuthContext = createContext();
+
+    const upsertProfile = async (user) => {
+      if (!user) return;
+      const displayName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'User';
+      await supabaseClient.from('profiles').upsert({
+        id: user.id,
+        display_name: displayName
+      });
+    };
+
+    const AuthProvider = ({ children }) => {
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        supabaseClient.auth.getSession().then(({ data: { session } }) => {
+          setUser(session?.user ?? null);
+          setLoading(false);
+          if (session?.user) upsertProfile(session.user);
+        });
+
+        const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
+          setUser(session?.user ?? null);
+          setLoading(false);
+          if (session?.user) upsertProfile(session.user);
+        });
+
+        return () => subscription.unsubscribe();
+      }, []);
+
+      const signUp = async (email, password, displayName) => {
+        try {
+          const { data, error } = await supabaseClient.auth.signUp({
+            email,
+            password,
+            options: { data: { display_name: displayName } }
+          });
+          if (error) throw error;
+          showToast('Account created successfully!', 'success');
+          // If email confirmation off or already confirmed, ensure profile
+          if (data?.user) await upsertProfile(data.user);
+          return data;
+        } catch (error) {
+          showToast(error.message, 'error');
+          throw error;
+        }
+      };
+
+      const signIn = async (email, password) => {
+        try {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          showToast('Successfully signed in!', 'success');
+          if (data?.user) await upsertProfile(data.user);
+          return data;
+        } catch (error) {
+          showToast(error.message, 'error');
+          throw error;
+        }
+      };
+
+      const signOut = async () => {
+        try {
+          const { error } = await supabaseClient.auth.signOut();
+          if (error) throw error;
+          showToast('Successfully signed out!', 'success');
+        } catch (error) {
+          showToast(error.message, 'error');
+          throw error;
+        }
+      };
+
+      return (
+        <AuthContext.Provider value={{user, signUp, signIn, signOut}}>
+          {!loading && children}
+        </AuthContext.Provider>
+      );
+    };
+
+    const useAuth = () => useContext(AuthContext);
+
+    // ==========================
+    // Navbar (fixed className template)
+    // ==========================
+    const Navbar = ({ currentPage, setCurrentPage }) => {
+      const { user, signOut } = useAuth();
+      return (
+        <nav className="glass rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                <span className="text-white font-bold text-sm">GS</span>
+              </div>
+              <h1 className="text-white text-xl font-bold">Glassy Social</h1>
+            </div>
+
+            {user && (
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setCurrentPage('feed')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    currentPage === 'feed'
+                      ? 'bg-white/20 text-white'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  Feed
+                </button>
+                <button
+                  onClick={() => setCurrentPage('chat')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    currentPage === 'chat'
+                      ? 'bg-white/20 text-white'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  Chat
+                </button>
+                <button
+                  onClick={() => setCurrentPage('profile')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    currentPage === 'profile'
+                      ? 'bg-white/20 text-white'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  Profile
+                </button>
+                <button
+                  onClick={signOut}
+                  className="px-4 py-2 bg-red-500/20 text-white rounded-lg hover:bg-red-500/30 transition-all"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
+        </nav>
+      );
+    };
+
+    // ==========================
+    // Login Form
+    // ==========================
+    const LoginForm = () => {
+      const [isSignUp, setIsSignUp] = useState(false);
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [name, setName] = useState('');
+      const [loading, setLoading] = useState(false);
+      const { signUp, signIn } = useAuth();
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+          if (isSignUp) {
+            await signUp(email, password, name);
+          } else {
+            await signIn(email, password);
+          }
+          setEmail('');
+          setPassword('');
+          setName('');
+        } catch (error) {
+          console.error('Authentication error:', error);
+        }
+        setLoading(false);
+      };
+
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="glass rounded-2xl p-8 w-full max-w-md">
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-white font-bold text-2xl">GS</span>
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {isSignUp ? 'Join Glassy Social' : 'Welcome Back'}
+              </h2>
+              <p className="text-white/70">
+                {isSignUp ? 'Create your account to get started' : 'Sign in to your account'}
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {isSignUp && (
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Full Name"
+                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  required
+                />
+              )}
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email"
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                required
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                required
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full btn-primary text-white py-3 rounded-lg font-medium disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : (isSignUp ? 'Sign Up' : 'Sign In')}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <button
+                onClick={() => setIsSignUp(!isSignUp)}
+                className="text-white/70 hover:text-white transition-colors"
+              >
+                {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ==========================
+    // Feed (DB-backed + realtime)
+    // ==========================
+    const Feed = () => {
+      const [posts, setPosts] = useState([]);
+      const [newPost, setNewPost] = useState('');
+      const [loading, setLoading] = useState(true);
+      const { user } = useAuth();
+
+      const loadPosts = async () => {
+        setLoading(true);
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (error) {
+          showToast(error.message, 'error');
+        } else {
+          setPosts(data || []);
+        }
+        setLoading(false);
+      };
+
+      useEffect(() => {
+        loadPosts();
+
+        // Realtime subscription
+        const channel = supabaseClient
+          .channel('public:posts')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'posts' },
+            (payload) => {
+              if (payload.eventType === 'INSERT') {
+                setPosts((prev) => [payload.new, ...prev]);
+              } else if (payload.eventType === 'UPDATE') {
+                setPosts((prev) => prev.map(p => p.id === payload.new.id ? payload.new : p));
+              } else if (payload.eventType === 'DELETE') {
+                setPosts((prev) => prev.filter(p => p.id !== payload.old.id));
+              }
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabaseClient.removeChannel(channel);
+        };
+      }, []);
+
+      const handlePost = async (e) => {
+        e.preventDefault();
+        if (!newPost.trim()) return;
+        const author_name = user?.user_metadata?.display_name || user?.email || 'User';
+        const { error } = await supabaseClient.from('posts').insert({
+          author_id: user.id,
+          author_name,
+          content: newPost.trim()
+        });
+        if (error) {
+          showToast(error.message, 'error');
+        } else {
+          showToast('Post created!', 'success');
+          setNewPost('');
+        }
+      };
+
+      const likePost = async (post) => {
+        // simple client-side increment (demo)
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .update({ likes: (post.likes || 0) + 1 })
+          .eq('id', post.id)
+          .select()
+          .single();
+        if (error) {
+          showToast(error.message, 'error');
+        } else {
+          // UI will update via realtime, but update local quickly:
+          setPosts((prev) => prev.map(p => p.id === data.id ? data : p));
+        }
+      };
+
+      return (
+        <div className="max-w-2xl mx-auto">
+          {/* Post Composer */}
+          <div className="post-card rounded-2xl p-6 mb-6">
+            <form onSubmit={handlePost}>
+              <textarea
+                value={newPost}
+                onChange={(e) => setNewPost(e.target.value)}
+                placeholder="What's on your mind?"
+                className="w-full bg-transparent text-white placeholder-white/50 resize-none focus:outline-none text-lg"
+                rows="3"
+              />
+              <div className="flex justify-end mt-4">
+                <button type="submit" className="btn-primary px-6 py-2 rounded-lg text-white font-medium">
+                  Post
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Posts */}
+          {loading ? (
+            <div className="text-white/80 text-center">Loading posts…</div>
+          ) : posts.length === 0 ? (
+            <div className="post-card rounded-2xl p-6 mb-6 text-center text-white/80">
+              No posts yet. Be the first! 🎉
+            </div>
+          ) : (
+            posts.map(post => (
+              <div key={post.id} className="post-card rounded-2xl p-6 mb-6">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                    <span className="text-white font-bold text-sm">
+                      {(post.author_name || 'U').charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-white font-medium">{post.author_name || 'User'}</p>
+                    <p className="text-white/50 text-sm">{fmtTime(post.created_at)}</p>
+                  </div>
+                </div>
+                <p className="text-white text-lg mb-4 whitespace-pre-wrap">{post.content}</p>
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={() => likePost(post)}
+                    className="flex items-center space-x-2 text-white/70 hover:text-pink-400"
+                    title="Like"
+                  >
+                    <span>❤️</span>
+                    <span>{post.likes || 0}</span>
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      );
+    };
+
+    // ==========================
+    // Chat (DB-backed + realtime)
+    // ==========================
+    const Chat = () => {
+      const [messages, setMessages] = useState([]);
+      const [newMessage, setNewMessage] = useState('');
+      const [loading, setLoading] = useState(true);
+      const { user } = useAuth();
+      const listRef = useRef(null);
+
+      const scrollToBottom = () => {
+        if (listRef.current) {
+          listRef.current.scrollTop = listRef.current.scrollHeight;
+        }
+      };
+
+      const loadMessages = async () => {
+        setLoading(true);
+        const { data, error } = await supabaseClient
+          .from('messages')
+          .select('*')
+          .order('created_at', { ascending: true })
+          .limit(200);
+        if (error) {
+          showToast(error.message, 'error');
+        } else {
+          setMessages(data || []);
+          setTimeout(scrollToBottom, 50);
+        }
+        setLoading(false);
+      };
+
+      useEffect(() => {
+        loadMessages();
+
+        const channel = supabaseClient
+          .channel('public:messages')
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'messages' },
+            (payload) => {
+              setMessages((prev) => [...prev, payload.new]);
+              setTimeout(scrollToBottom, 10);
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabaseClient.removeChannel(channel);
+        };
+      }, []);
+
+      const handleSend = async (e) => {
+        e.preventDefault();
+        if (!newMessage.trim()) return;
+        const author_name = user?.user_metadata?.display_name || user?.email || 'User';
+        const { error } = await supabaseClient.from('messages').insert({
+          author_id: user.id,
+          author_name,
+          content: newMessage.trim()
+        });
+        if (error) {
+          showToast(error.message, 'error');
+        } else {
+          setNewMessage('');
+        }
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto">
+          <div className="glass rounded-2xl p-6 h-96 mb-4 flex flex-col">
+            <div ref={listRef} className="flex-1 overflow-y-auto space-y-4 mb-4">
+              {loading ? (
+                <div className="text-white/80 text-center">Loading messages…</div>
+              ) : messages.length === 0 ? (
+                <div className="text-white/80 text-center">Say hi 👋</div>
+              ) : (
+                messages.map(message => (
+                  <div key={message.id} className="bg-white/10 rounded-lg p-3">
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-white font-medium">{message.author_name || 'User'}</span>
+                      <span className="text-white/50 text-xs">{fmtTime(message.created_at)}</span>
+                    </div>
+                    <p className="text-white whitespace-pre-wrap">{message.content}</p>
+                  </div>
+                ))
+              )}
+            </div>
+            <form onSubmit={handleSend} className="flex space-x-3">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder="Type a message..."
+                className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <button type="submit" className="btn-primary px-6 py-2 rounded-lg text-white font-medium">
+                Send
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    };
+
+    // ==========================
+    // Profile
+    // ==========================
+    const Profile = () => {
+      const { user } = useAuth();
+      const [profile, setProfile] = useState(null);
+
+      useEffect(() => {
+        const load = async () => {
+          if (!user) return;
+          const { data } = await supabaseClient.from('profiles').select('*').eq('id', user.id).single();
+          setProfile(data || null);
+        };
+        load();
+      }, [user]);
+
+      return (
+        <div className="max-w-4xl mx-auto">
+          <div className="glass rounded-2xl p-8">
+            <div className="flex items-center space-x-6 mb-8">
+              <div className="w-24 h-24 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                <span className="text-white font-bold text-3xl">
+                  {(profile?.display_name || user?.email || 'U').charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-white mb-2">
+                  {profile?.display_name || user?.email}
+                </h1>
+                <p className="text-white/70 mb-4">Welcome to Glassy Social! 🌟</p>
+                <div className="flex space-x-6 text-sm">
+                  <div className="text-center">
+                    <div className="text-white font-bold text-xl">—</div>
+                    <div className="text-white/70">Posts</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-white font-bold text-xl">—</div>
+                    <div className="text-white/70">Following</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-white font-bold text-xl">—</div>
+                    <div className="text-white/70">Followers</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="text-center py-12">
+              <p className="text-white/70 text-lg">Your posts will appear here (feature TBD)</p>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ==========================
+    // Main App
+    // ==========================
+    const App = () => {
+      const [currentPage, setCurrentPage] = useState('feed');
+      const { user } = useAuth();
+
+      if (!user) {
+        return <LoginForm />;
+      }
+
+      const renderPage = () => {
+        switch (currentPage) {
+          case 'chat': return <Chat />;
+          case 'profile': return <Profile />;
+          default: return <Feed />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4">
+          <div className="max-w-6xl mx-auto">
+            <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} />
+            {renderPage()}
+          </div>
+        </div>
+      );
+    };
+
+    const AppRoot = () => (
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    ReactDOM.render(<AppRoot />, document.getElementById('root'));
+  </script>
+</body>
+</html>
