@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>Glassy Social - Modern Social Media Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { font-family: 'Inter', sans-serif; }
+    html, body { height: 100%; }
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .post-card {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(15px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.3s ease;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      transition: all 0.3s ease;
+    }
+    input, textarea, button, select { font-size: 16px; }
+    .post-img { 
+      width: 100%; 
+      border-radius: 12px; 
+      object-fit: cover; 
+      max-height: 480px;
+      display: block;
+    }
+    .loading-spinner {
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 2px solid #fff;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="toast-container" style="position: fixed; top: 20px; right: 20px; z-index: 9999;"></div>
+
+  <script type="text/babel">
+    const supabaseUrl = 'https://rzbrlrkigfdwqrrlpbuq.supabase.co';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnJscmtpZ2Zkd3FycmxwYnVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzNTc0NTEsImV4cCI6MjA3MTkzMzQ1MX0.JLAlo06HXzNZeOlIB3Hla4kDDFutd2Jye8ImqWraNsM';
+    const { createClient } = supabase;
+    const supabaseClient = createClient(supabaseUrl, supabaseKey);
+
+    const { useState, useEffect, useContext, createContext, useRef } = React;
+
+    window.showToast = function(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500' };
+      toast.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg mb-2 transform transition-all duration-300 translate-x-full opacity-0`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => { toast.classList.remove('translate-x-full', 'opacity-0'); }, 80);
+      setTimeout(() => {
+        toast.classList.add('translate-x-full', 'opacity-0');
+        setTimeout(() => {
+          if (container.contains(toast)) {
+            container.removeChild(toast);
+          }
+        }, 300);
+      }, 3000);
+    };
+
+    const fmtTime = (iso) => { 
+      try { 
+        const date = new Date(iso);
+        const now = new Date();
+        const diff = now - date;
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+        
+        if (minutes < 1) return 'Just now';
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        if (days < 7) return `${days}d ago`;
+        return date.toLocaleDateString();
+      } catch { 
+        return 'Just now'; 
+      } 
+    };
+    const nonEmpty = (s) => (s || '').trim().length > 0;
+    const EMOJIS = ['🤣','😍','😥','🥰','😴','😭','😠','🤡'];
+
+    const AuthContext = createContext();
+   const upsertProfile = async (user) => {
+      if (!user) return;
+      const displayName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'User';
+      
+      try {
+        const { error } = await supabaseClient.from('profiles').upsert({
+          id: user.id,
+          display_name: displayName,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+        if (error) console.warn('profile upsert error:', error.message);
+      } catch (err) {
+        console.warn('profile upsert error:', err.message);
+      }
+    };
+
+    const AuthProvider = ({ children }) => {
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        supabaseClient.auth.getSession().then(({ data: { session } }) => {
+          setUser(session?.user ?? null);
+          setLoading(false);
+          if (session?.user) {
+            upsertProfile(session.user);
+          }
+        });
+
+        const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
+          async (event, session) => {
+            console.log('Auth state changed:', event, session?.user?.email);
+            setUser(session?.user ?? null);
+            setLoading(false);
+            if (session?.user) {
+              await upsertProfile(session.user);
+            }
+          }
+        );
+
+        return () => subscription.unsubscribe();
+      }, []);
+
+      const signUp = async (email, password, displayName) => {
+        try {
+          const { data, error } = await supabaseClient.auth.signUp({
+            email,
+            password,
+            options: { data: { display_name: displayName } }
+          });
+          if (error) throw error;
+          showToast('Account created successfully!', 'success');
+          if (data?.user) await upsertProfile(data.user);
+          return data;
+       } catch (e) { 
+          showToast(e.message, 'error'); 
+          throw e; 
+        }
+      };
+
+      const signIn = async (email, password) => {
+        try {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          showToast('Successfully signed in!', 'success');
+          if (data?.user) await upsertProfile(data.user);
+          return data;
+        } catch (e) { 
+          showToast(e.message, 'error'); 
+          throw e; 
+        }
+      };
+
+      const signOut = async () => {
+        try {
+          const { error } = await supabaseClient.auth.signOut();
+          if (error) throw error;
+          showToast('Successfully signed out!', 'success');
+        } catch (e) { 
+          showToast(e.message, 'error'); 
+        }
+      };
+
+      return (
+        <AuthContext.Provider value={{user, signUp, signIn, signOut, loading}}>
+          {!loading && children}
+        </AuthContext.Provider>
+      );
+    };
+    
+    const useAuth = () => useContext(AuthContext);
+
+    async function uploadPostImage(file, userId) {
+      try {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
+        const filePath = `${userId}/${fileName}`;
+
+        const { data, error } = await supabaseClient.storage
+          .from('post-images')
+          .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+        if (error) throw error;
+
+        const { data: urlData } = supabaseClient.storage
+          .from('post-images')
+          .getPublicUrl(data.path);
+
+        return urlData.publicUrl;
+      } catch (error) {
+        console.error('Upload failed:', error);
+        throw error;
+      }
+    }
+
+    const Navbar = ({ currentPage, setCurrentPage }) => {
+      const { user, signOut } = useAuth();
+      
+      return (
+        <nav className="glass rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                <span className="text-white font-bold text-sm">GS</span>
+              </div>
+              <div>
+                <h1 className="text-white text-xl font-bold leading-tight">Glassy Social</h1>
+                <p className="text-white/70 text-xs -mt-0.5">by talha</p>
+              </div>
+            </div>
+
+            {user && (
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={() => setCurrentPage('feed')}
+                  className={`px-3 py-2 rounded-lg transition-all ${currentPage === 'feed' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+                >
+                  Feed
+                </button>
+                <button 
+                  onClick={() => setCurrentPage('chat')}
+                  className={`px-3 py-2 rounded-lg transition-all ${currentPage === 'chat' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+                >
+                  Chat
+                </button>
+                <button 
+                  onClick={() => setCurrentPage('profile')}
+                  className={`px-3 py-2 rounded-lg transition-all ${currentPage === 'profile' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+                >
+                  Profile
+                </button>
+                <button 
+                  onClick={signOut}
+                  className="px-3 py-2 bg-red-500/20 text-white rounded-lg hover:bg-red-500/30 transition-all"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
+        </nav>
+      );
+    };
+
+    const LoginForm = () => {
+      const [isSignUp, setIsSignUp] = useState(false);
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [name, setName] = useState('');
+      const [loading, setLoading] = useState(false);
+      const { signUp, signIn } = useAuth();
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!email || !password) {
+          showToast('Please fill in all fields', 'error');
+          return;
+        }
+        if (isSignUp && !name) {
+          showToast('Please enter your name', 'error');
+          return;
+        }
+
+        setLoading(true);
+        try {
+          if (isSignUp) {
+            await signUp(email, password, name);
+          } else {
+            await signIn(email, password);
+          }
+          setEmail(''); 
+          setPassword(''); 
+          setName('');
+        } catch (error) { 
+          console.error('Auth error:', error);
+        }
+        setLoading(false);
+      };
+
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="glass rounded-2xl p-8 w-full max-w-md">
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-white font-bold text-2xl">GS</span>
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {isSignUp ? 'Join Glassy Social' : 'Welcome Back'}
+              </h2>
+              <p className="text-white/70">
+                {isSignUp ? 'Create your account to get started' : 'Sign in to your account'}
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {isSignUp && (
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Full Name"
+                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  required
+                />
+              )}
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email"
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                required
+                inputMode="email"
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                required
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full btn-primary text-white py-3 rounded-lg font-medium disabled:opacity-50 flex items-center justify-center"
+              >
+                {loading ? (
+                  <>
+                    <div className="loading-spinner mr-2"></div>
+                    Loading...
+                  </>
+                ) : (
+                  isSignUp ? 'Sign Up' : 'Sign In'
+                )}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <button
+                onClick={() => setIsSignUp(!isSignUp)}
+                className="text-white/70 hover:text-white transition-colors"
+              >
+                {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const ReactionBar = ({ postId, currentUserId }) => {
+      const [counts, setCounts] = useState({});
+      const [myReacts, setMyReacts] = useState(new Set());
+      const [loading, setLoading] = useState(false);
+
+      const loadReactions = async () => {
+        try {
+          const { data, error } = await supabaseClient
+            .from('post_reactions')
+            .select('emoji, user_id')
+            .eq('post_id', postId);
+          
+          if (error) { 
+            console.warn('Load reactions error:', error.message); 
+            return; 
+          }
+          
+          const c = {};
+          const mine = new Set();
+          (data || []).forEach(r => {
+            c[r.emoji] = (c[r.emoji] || 0) + 1;
+            if (r.user_id === currentUserId) mine.add(r.emoji);
+          });
+          setCounts(c);
+          setMyReacts(mine);
+        } catch (err) {
+          console.warn('Load reactions error:', err.message);
+        }
+      };
+
+      useEffect(() => {
+        if (!postId || !currentUserId) return;
+        
+        loadReactions();
+        
+        const channel = supabaseClient
+          .channel(`post_reactions_${postId}`)
+          .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${postId}` },
+            (payload) => {
+              console.log('Reaction change:', payload);
+              loadReactions();
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabaseClient.removeChannel(channel);
+        };
+      }, [postId, currentUserId]);
+
+      const toggle = async (emoji) => {
+        if (!currentUserId || loading) return;
+        
+        setLoading(true);
+        try {
+          if (myReacts.has(emoji)) {
+            const { error } = await supabaseClient
+              .from('post_reactions')
+              .delete()
+              .eq('post_id', postId)
+              .eq('user_id', currentUserId)
+              .eq('emoji', emoji);
+            if (error) throw error;
+          } else {
+            const { error } = await supabaseClient
+              .from('post_reactions')
+              .insert({ post_id: postId, user_id: currentUserId, emoji });
+            if (error) throw error;
+          }
+        } catch (error) {
+          console.error('Reaction error:', error);
+          showToast('Failed to update reaction', 'error');
+        }
+        setLoading(false);
+      };
+
+      return (
+        <div className="flex flex-wrap gap-2 mt-3">
+          {EMOJIS.map(e => {
+            const active = myReacts.has(e);
+            const count = counts[e] || 0;
+            return (
+              <button
+                key={e}
+                onClick={() => toggle(e)}
+                disabled={loading}
+                className={`px-2.5 py-1 rounded-full text-sm border transition disabled:opacity-50 ${
+                  active ? 'bg-white/30 border-white/60 text-white' : 'bg-white/10 border-white/30 text-white/90 hover:bg-white/20'
+                }`}
+                title={active ? 'Remove reaction' : 'Add reaction'}
+              >
+                <span className="align-middle">{e}</span>
+                {count > 0 && <span className="ml-1 align-middle">{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      );
+    };
+
+    const Comments = ({ postId }) => {
+      const { user } = useAuth();
+      const [comments, setComments] = useState([]);
+      const [newComment, setNewComment] = useState('');
+      const [editingId, setEditingId] = useState(null);
+      const [editingText, setEditingText] = useState('');
+
+      const authorName = () => (user?.user_metadata?.display_name) || user?.email?.split('@')[0] || 'User';
+
+      const load = async () => {
+        const { data, error } = await supabaseClient
+          .from('comments')
+          .select('*')
+          .eq('post_id', postId)
+          .order('created_at', { ascending: true });
+        if (error) showToast(error.message, 'error');
+        else setComments(data || []);
+      };
+
+      useEffect(() => { 
+        load(); 
+        
+        const handler = (ev) => {
+          const payload = ev.detail;
+          if (payload.table !== 'comments') return;
+          const row = payload.new || payload.old;
+          if (!row || row.post_id !== postId) return;
+
+          if (payload.eventType === 'INSERT') {
+            setComments((prev) => [...prev, payload.new]);
+          } else if (payload.eventType === 'UPDATE') {
+            setComments((prev) => prev.map(c => c.id === payload.new.id ? payload.new : c));
+          } else if (payload.eventType === 'DELETE') {
+            setComments((prev) => prev.filter(c => c.id !== payload.old.id));
+          }
+        };
+        window.addEventListener('comments-changed', handler);
+        return () => window.removeEventListener('comments-changed', handler);
+      }, [postId]);
+
+      const addComment = async (e) => {
+        e.preventDefault();
+        if (!nonEmpty(newComment)) return;
+        const { error } = await supabaseClient.from('comments').insert({
+          post_id: postId,
+          author_id: user.id,
+          author_name: authorName(),
+          content: newComment.trim()
+        });
+        if (error) showToast(error.message, 'error');
+        else setNewComment('');
+      };
+
+      const startEdit = (c) => { setEditingId(c.id); setEditingText(c.content); };
+      const saveEdit = async (id) => {
+        if (!nonEmpty(editingText)) return;
+        const { error } = await supabaseClient.from('comments').update({ content: editingText.trim() }).eq('id', id);
+        if (error) showToast(error.message, 'error');
+        else { showToast('Comment updated!', 'success'); setEditingId(null); setEditingText(''); }
+      };
+      const cancelEdit = () => { setEditingId(null); setEditingText(''); };
+      const deleteComment = async (id) => {
+        if (!confirm('Delete this comment?')) return;
+        const { error } = await supabaseClient.from('comments').delete().eq('id', id);
+        if (error) showToast(error.message, 'error');
+        else showToast('Comment deleted', 'success');
+      };
+
+      return (
+        <div className="mt-4">
+          <h3 className="text-white/80 mb-2 font-medium">Comments</h3>
+
+          {comments.length === 0 ? (
+            <div className="text-white/60 mb-3">No comments yet.</div>
+          ) : (
+            <div className="space-y-2 mb-3">
+              {comments.map(c => (
+                <div key={c.id} className="bg-white/10 p-3 rounded-lg text-white">
+                  <div className="flex items-start justify-between">
+                    <div className="min-w-0">
+                      <div className="font-medium break-all">{c.author_name || 'User'}</div>
+                      <div className="text-xs text-white/60">{fmtTime(c.created_at)}</div>
+                    </div>
+                    {user?.id === c.author_id && editingId !== c.id && (
+                      <div className="flex gap-3 text-sm">
+                        <button onClick={() => startEdit(c)} className="text-blue-300 hover:text-blue-200">Edit</button>
+                        <button onClick={() => deleteComment(c.id)} className="text-red-300 hover:text-red-200">Delete</button>
+                      </div>
+                    )}
+                  </div>
+
+                  {editingId === c.id ? (
+                    <div className="mt-2">
+                      <textarea
+                        value={editingText}
+                        onChange={(e) => setEditingText(e.target.value)}
+                        className="w-full bg-white/10 border border-white/20 rounded-lg text-white p-2"
+                        rows="2"
+                      />
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => saveEdit(c.id)} className="px-3 py-1 rounded bg-green-500 text-white text-sm">Save</button>
+                        <button onClick={cancelEdit} className="px-3 py-1 rounded bg-gray-500/50 text-white text-sm">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-2 whitespace-pre-wrap break-words">{c.content}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={addComment} className="flex gap-2">
+            <input
+              type="text"
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="Write a comment..."
+              className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <button type="submit" className="btn-primary px-4 py-2 rounded-lg text-white">
+              Send
+            </button>
+          </form>
+        </div>
+      );
+    };
+
+    const Feed = () => {
+      const { user } = useAuth();
+      const [posts, setPosts] = useState([]);
+      const [newPost, setNewPost] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [editingId, setEditingId] = useState(null);
+      const [editingText, setEditingText] = useState('');
+      const [file, setFile] = useState(null);
+      const [uploading, setUploading] = useState(false);
+      const fileInputRef = useRef(null);
+
+      const authorName = () => (user?.user_metadata?.display_name) || user?.email?.split('@')[0] || 'User';
+
+      const loadPosts = async () => {
+        try {
+          setLoading(true);
+          const { data, error } = await supabaseClient
+            .from('posts')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
+          
+          if (error) { 
+            console.error('Load posts error:', error);
+            showToast('Failed to load posts', 'error'); 
+          } else { 
+            console.log('Loaded posts:', data?.length || 0);
+            setPosts(data || []); 
+          }
+        } catch (err) {
+          console.error('Load posts error:', err);
+          showToast('Failed to load posts', 'error');
+        }
+        setLoading(false);
+      };
+
+      useEffect(() => {
+        if (!user) return;
+        
+        loadPosts();
+
+        const channelPosts = supabaseClient
+          .channel('posts_feed')
+          .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'posts' },
+            (payload) => {
+              console.log('Post change:', payload.eventType, payload);
+              
+              if (payload.eventType === 'INSERT') {
+                setPosts((prev) => {
+                  if (prev.some(p => p.id === payload.new.id)) {
+                    return prev;
+                  }
+                  return [payload.new, ...prev];
+                });
+              } else if (payload.eventType === 'UPDATE') {
+                setPosts((prev) => prev.map(p => 
+                  p.id === payload.new.id ? payload.new : p
+                ));
+              } else if (payload.eventType === 'DELETE') {
+                setPosts((prev) => prev.filter(p => p.id !== payload.old.id));
+              }
+            }
+          )
+          .subscribe();
+
+        const channelComments = supabaseClient
+          .channel('comments_feed')
+          .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'comments' },
+            (payload) => {
+              console.log('Comment change:', payload.eventType);
+              window.dispatchEvent(new CustomEvent('comments-changed', { detail: payload }));
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabaseClient.removeChannel(channelPosts);
+          supabaseClient.removeChannel(channelComments);
+        };
+      }, [user]);
+
+      const handlePost = async (e) => {
+        e.preventDefault();
+        
+        if (!nonEmpty(newPost) && !file) { 
+          showToast('Write something or add a photo.', 'info'); 
+          return; 
+        }
+        
+        setUploading(true);
+        try {
+          let image_url = null;
+          
+          if (file) {
+            console.log('Uploading image...');
+            image_url = await uploadPostImage(file, user.id);
+            console.log('Image uploaded:', image_url);
+          }
+          
+          const postData = {
+            author_id: user.id,
+            author_name: authorName(),
+            content: (newPost || '').trim(),
+            image_url
+          };
+          
+          console.log('Creating post:', postData);
+          
+          const { data, error } = await supabaseClient
+            .from('posts')
+            .insert(postData)
+            .select()
+            .single();
+          
+          if (error) throw error;
+          
+          console.log('Post created:', data);
+          showToast('Post created!', 'success');
+          
+          setNewPost('');
+          setFile(null);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
+          
+        } catch (err) {
+          console.error('Post creation error:', err);
+          showToast(err.message || 'Failed to create post', 'error');
+        }
+        setUploading(false);
+      };
+
+      const startEdit = (post) => {
+        setEditingId(post.id);
+        setEditingText(post.content || '');
+      };
+
+      const saveEdit = async (id) => {
+        try {
+          const payload = { content: (editingText || '').trim() };
+          const { error } = await
