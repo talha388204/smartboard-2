@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- Prevent mobile zoom quirks; keep inputs >=16px to avoid iOS zoom -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>Glassy Social - Modern Social Media Platform</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -34,40 +35,30 @@
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       transition: all 0.3s ease;
     }
+    /* Inputs >= 16px to avoid mobile zoom */
     input, textarea, button, select { font-size: 16px; }
-    .post-img { 
-      width: 100%; 
-      border-radius: 12px; 
-      object-fit: cover; 
-      max-height: 480px;
-      display: block;
-    }
-    .loading-spinner {
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
-      border-top: 2px solid #fff;
-      width: 20px;
-      height: 20px;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+    /* Image aspect */
+    .post-img { width: 100%; border-radius: 12px; object-fit: cover; max-height: 480px; }
   </style>
 </head>
 <body>
   <div id="root"></div>
-  <div id="toast-container" style="position: fixed; top: 20px; right: 20px; z-index: 9999;"></div>
+  <div id="toast-container" style="position: fixed; top: env(safe-area-inset-top, 20px); right: 20px; z-index: 9999;"></div>
 
   <script type="text/babel">
+    // ==========================
+    // Supabase Configuration
+    // ==========================
     const supabaseUrl = 'https://rzbrlrkigfdwqrrlpbuq.supabase.co';
     const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnJscmtpZ2Zkd3FycmxwYnVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzNTc0NTEsImV4cCI6MjA3MTkzMzQ1MX0.JLAlo06HXzNZeOlIB3Hla4kDDFutd2Jye8ImqWraNsM';
     const { createClient } = supabase;
     const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
-    const { useState, useEffect, useContext, createContext, useRef } = React;
+    const { useState, useEffect, useContext, createContext, useRef, useMemo } = React;
 
+    // ==========================
+    // Toast
+    // ==========================
     window.showToast = function(message, type = 'info') {
       const container = document.getElementById('toast-container');
       const toast = document.createElement('div');
@@ -78,50 +69,33 @@
       setTimeout(() => { toast.classList.remove('translate-x-full', 'opacity-0'); }, 80);
       setTimeout(() => {
         toast.classList.add('translate-x-full', 'opacity-0');
-        setTimeout(() => {
-          if (container.contains(toast)) {
-            container.removeChild(toast);
-          }
-        }, 300);
+        setTimeout(() => container.removeChild(toast), 300);
       }, 3000);
     };
 
-    const fmtTime = (iso) => { 
-      try { 
-        const date = new Date(iso);
-        const now = new Date();
-        const diff = now - date;
-        const minutes = Math.floor(diff / 60000);
-        const hours = Math.floor(diff / 3600000);
-        const days = Math.floor(diff / 86400000);
-        
-        if (minutes < 1) return 'Just now';
-        if (minutes < 60) return `${minutes}m ago`;
-        if (hours < 24) return `${hours}h ago`;
-        if (days < 7) return `${days}d ago`;
-        return date.toLocaleDateString();
-      } catch { 
-        return 'Just now'; 
-      } 
-    };
+    // ==========================
+    // Helpers
+    // ==========================
+    const fmtTime = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return 'Just now'; } };
     const nonEmpty = (s) => (s || '').trim().length > 0;
-    const EMOJIS = ['🤣','😍','😥','🥰','😴','😭','😠','🤡'];
+    const EMOJIS = ['🤣','😍','😥','🥰','😴','😒','😭','😠','🤡'];
 
+    // ==========================
+    // Auth Context
+    // ==========================
     const AuthContext = createContext();
-   const upsertProfile = async (user) => {
+
+    const upsertProfile = async (user) => {
       if (!user) return;
-      const displayName = user.user_metadata?.display_name || user.email?.split('@')[0] || 'User';
-      
-      try {
-        const { error } = await supabaseClient.from('profiles').upsert({
-          id: user.id,
-          display_name: displayName,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
-        if (error) console.warn('profile upsert error:', error.message);
-      } catch (err) {
-        console.warn('profile upsert error:', err.message);
-      }
+      const displayName =
+        user.user_metadata?.display_name ||
+        user.email?.split('@')[0] ||
+        'User';
+      const { error } = await supabaseClient.from('profiles').upsert({
+        id: user.id,
+        display_name: displayName,
+      });
+      if (error) console.warn('profile upsert error:', error.message);
     };
 
     const AuthProvider = ({ children }) => {
@@ -132,22 +106,16 @@
         supabaseClient.auth.getSession().then(({ data: { session } }) => {
           setUser(session?.user ?? null);
           setLoading(false);
-          if (session?.user) {
-            upsertProfile(session.user);
-          }
+          if (session?.user) upsertProfile(session.user);
         });
 
         const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
-          async (event, session) => {
-            console.log('Auth state changed:', event, session?.user?.email);
+          async (_event, session) => {
             setUser(session?.user ?? null);
             setLoading(false);
-            if (session?.user) {
-              await upsertProfile(session.user);
-            }
+            if (session?.user) upsertProfile(session.user);
           }
         );
-
         return () => subscription.unsubscribe();
       }, []);
 
@@ -162,10 +130,7 @@
           showToast('Account created successfully!', 'success');
           if (data?.user) await upsertProfile(data.user);
           return data;
-       } catch (e) { 
-          showToast(e.message, 'error'); 
-          throw e; 
-        }
+        } catch (e) { showToast(e.message, 'error'); throw e; }
       };
 
       const signIn = async (email, password) => {
@@ -175,10 +140,7 @@
           showToast('Successfully signed in!', 'success');
           if (data?.user) await upsertProfile(data.user);
           return data;
-        } catch (e) { 
-          showToast(e.message, 'error'); 
-          throw e; 
-        }
+        } catch (e) { showToast(e.message, 'error'); throw e; }
       };
 
       const signOut = async () => {
@@ -186,46 +148,35 @@
           const { error } = await supabaseClient.auth.signOut();
           if (error) throw error;
           showToast('Successfully signed out!', 'success');
-        } catch (e) { 
-          showToast(e.message, 'error'); 
-        }
+        } catch (e) { showToast(e.message, 'error'); }
       };
 
       return (
-        <AuthContext.Provider value={{user, signUp, signIn, signOut, loading}}>
+        <AuthContext.Provider value={{user, signUp, signIn, signOut}}>
           {!loading && children}
         </AuthContext.Provider>
       );
     };
-    
     const useAuth = () => useContext(AuthContext);
 
+    // ==========================
+    // Storage helper for post images
+    // ==========================
     async function uploadPostImage(file, userId) {
-      try {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
-        const filePath = `${userId}/${fileName}`;
-
-        const { data, error } = await supabaseClient.storage
-          .from('post-images')
-          .upload(filePath, file, { cacheControl: '3600', upsert: false });
-
-        if (error) throw error;
-
-        const { data: urlData } = supabaseClient.storage
-          .from('post-images')
-          .getPublicUrl(data.path);
-
-        return urlData.publicUrl;
-      } catch (error) {
-        console.error('Upload failed:', error);
-        throw error;
-      }
+      const path = `${userId}/${Date.now()}_${file.name}`.replaceAll(' ', '_');
+      const { data, error } = await supabaseClient
+        .storage.from('post-images')
+        .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type || 'image/jpeg' });
+      if (error) throw error;
+      const { data: pub } = supabaseClient.storage.from('post-images').getPublicUrl(data.path);
+      return pub.publicUrl;
     }
 
+    // ==========================
+    // Navbar
+    // ==========================
     const Navbar = ({ currentPage, setCurrentPage }) => {
       const { user, signOut } = useAuth();
-      
       return (
         <nav className="glass rounded-lg p-4 mb-6">
           <div className="flex items-center justify-between">
@@ -241,28 +192,20 @@
 
             {user && (
               <div className="flex items-center space-x-2">
-                <button 
-                  onClick={() => setCurrentPage('feed')}
-                  className={`px-3 py-2 rounded-lg transition-all ${currentPage === 'feed' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
-                >
+                <button onClick={() => setCurrentPage('feed')}
+                  className={`px-3 py-2 rounded-lg transition-all ${currentPage==='feed'?'bg-white/20 text-white':'text-white/70 hover:text-white hover:bg-white/10'}`}>
                   Feed
                 </button>
-                <button 
-                  onClick={() => setCurrentPage('chat')}
-                  className={`px-3 py-2 rounded-lg transition-all ${currentPage === 'chat' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
-                >
+                <button onClick={() => setCurrentPage('chat')}
+                  className={`px-3 py-2 rounded-lg transition-all ${currentPage==='chat'?'bg-white/20 text-white':'text-white/70 hover:text-white hover:bg-white/10'}`}>
                   Chat
                 </button>
-                <button 
-                  onClick={() => setCurrentPage('profile')}
-                  className={`px-3 py-2 rounded-lg transition-all ${currentPage === 'profile' ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
-                >
+                <button onClick={() => setCurrentPage('profile')}
+                  className={`px-3 py-2 rounded-lg transition-all ${currentPage==='profile'?'bg-white/20 text-white':'text-white/70 hover:text-white hover:bg-white/10'}`}>
                   Profile
                 </button>
-                <button 
-                  onClick={signOut}
-                  className="px-3 py-2 bg-red-500/20 text-white rounded-lg hover:bg-red-500/30 transition-all"
-                >
+                <button onClick={signOut}
+                  className="px-3 py-2 bg-red-500/20 text-white rounded-lg hover:bg-red-500/30 transition-all">
                   Sign Out
                 </button>
               </div>
@@ -272,6 +215,9 @@
       );
     };
 
+    // ==========================
+    // Login Form
+    // ==========================
     const LoginForm = () => {
       const [isSignUp, setIsSignUp] = useState(false);
       const [email, setEmail] = useState('');
@@ -282,15 +228,6 @@
 
       const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!email || !password) {
-          showToast('Please fill in all fields', 'error');
-          return;
-        }
-        if (isSignUp && !name) {
-          showToast('Please enter your name', 'error');
-          return;
-        }
-
         setLoading(true);
         try {
           if (isSignUp) {
@@ -298,12 +235,8 @@
           } else {
             await signIn(email, password);
           }
-          setEmail(''); 
-          setPassword(''); 
-          setName('');
-        } catch (error) { 
-          console.error('Auth error:', error);
-        }
+          setEmail(''); setPassword(''); setName('');
+        } catch (error) { /* toast already shown */ }
         setLoading(false);
       };
 
@@ -353,16 +286,9 @@
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full btn-primary text-white py-3 rounded-lg font-medium disabled:opacity-50 flex items-center justify-center"
+                className="w-full btn-primary text-white py-3 rounded-lg font-medium disabled:opacity-50"
               >
-                {loading ? (
-                  <>
-                    <div className="loading-spinner mr-2"></div>
-                    Loading...
-                  </>
-                ) : (
-                  isSignUp ? 'Sign Up' : 'Sign In'
-                )}
+                {loading ? 'Loading...' : (isSignUp ? 'Sign Up' : 'Sign In')}
               </button>
             </form>
 
@@ -379,85 +305,63 @@
       );
     };
 
+    // ==========================
+    // Reaction Bar (per post)
+    // ==========================
     const ReactionBar = ({ postId, currentUserId }) => {
-      const [counts, setCounts] = useState({});
-      const [myReacts, setMyReacts] = useState(new Set());
-      const [loading, setLoading] = useState(false);
+      const [counts, setCounts] = useState({}); // { '🤣': 3, ... }
+      const [myReacts, setMyReacts] = useState(new Set()); // emojis I reacted with
 
       const loadReactions = async () => {
-        try {
-          const { data, error } = await supabaseClient
-            .from('post_reactions')
-            .select('emoji, user_id')
-            .eq('post_id', postId);
-          
-          if (error) { 
-            console.warn('Load reactions error:', error.message); 
-            return; 
-          }
-          
-          const c = {};
-          const mine = new Set();
-          (data || []).forEach(r => {
-            c[r.emoji] = (c[r.emoji] || 0) + 1;
-            if (r.user_id === currentUserId) mine.add(r.emoji);
-          });
-          setCounts(c);
-          setMyReacts(mine);
-        } catch (err) {
-          console.warn('Load reactions error:', err.message);
-        }
+        const { data, error } = await supabaseClient
+          .from('post_reactions')
+          .select('emoji, user_id')
+          .eq('post_id', postId);
+        if (error) { console.warn(error.message); return; }
+        const c = {};
+        const mine = new Set();
+        (data || []).forEach(r => {
+          c[r.emoji] = (c[r.emoji] || 0) + 1;
+          if (r.user_id === currentUserId) mine.add(r.emoji);
+        });
+        setCounts(c);
+        setMyReacts(mine);
       };
 
       useEffect(() => {
-        if (!postId || !currentUserId) return;
-        
         loadReactions();
-        
+        // realtime
         const channel = supabaseClient
-          .channel(`post_reactions_${postId}`)
+          .channel(`public:post_reactions:${postId}`)
           .on('postgres_changes',
             { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${postId}` },
-            (payload) => {
-              console.log('Reaction change:', payload);
-              loadReactions();
-            }
+            (_payload) => { loadReactions(); }
           )
           .subscribe();
-
-        return () => {
-          supabaseClient.removeChannel(channel);
-        };
-      }, [postId, currentUserId]);
+        return () => supabaseClient.removeChannel(channel);
+      }, [postId]);
 
       const toggle = async (emoji) => {
-        if (!currentUserId || loading) return;
-        
-        setLoading(true);
-        try {
-          if (myReacts.has(emoji)) {
-            const { error } = await supabaseClient
-              .from('post_reactions')
-              .delete()
-              .eq('post_id', postId)
-              .eq('user_id', currentUserId)
-              .eq('emoji', emoji);
-            if (error) throw error;
-          } else {
-            const { error } = await supabaseClient
-              .from('post_reactions')
-              .insert({ post_id: postId, user_id: currentUserId, emoji });
-            if (error) throw error;
-          }
-        } catch (error) {
-          console.error('Reaction error:', error);
-          showToast('Failed to update reaction', 'error');
+        if (!currentUserId) return;
+        // if already reacted with this emoji => remove; else add
+        if (myReacts.has(emoji)) {
+          const { error } = await supabaseClient
+            .from('post_reactions')
+            .delete()
+            .eq('post_id', postId)
+            .eq('user_id', currentUserId)
+            .eq('emoji', emoji);
+          if (error) showToast(error.message, 'error');
+        } else {
+          const { error } = await supabaseClient
+            .from('post_reactions')
+            .insert({ post_id: postId, user_id: currentUserId, emoji });
+          if (error) showToast(error.message, 'error');
         }
-        setLoading(false);
       };
 
       return (
-        <div className="flex flex-wrap gap-2 mt-3">
+        <div className="flex flex-wrap gap-2 mt-2">
           {EMOJIS.map(e => {
             const active = myReacts.has(e);
             const count = counts[e] || 0;
@@ -465,14 +369,13 @@
               <button
                 key={e}
                 onClick={() => toggle(e)}
-                disabled={loading}
-                className={`px-2.5 py-1 rounded-full text-sm border transition disabled:opacity-50 ${
+                className={`px-2.5 py-1 rounded-full text-sm border transition ${
                   active ? 'bg-white/30 border-white/60 text-white' : 'bg-white/10 border-white/30 text-white/90 hover:bg-white/20'
                 }`}
                 title={active ? 'Remove reaction' : 'Add reaction'}
               >
                 <span className="align-middle">{e}</span>
-                {count > 0 && <span className="ml-1 align-middle">{count}</span>}
+                <span className="ml-1 align-middle">{count > 0 ? count : ''}</span>
               </button>
             );
           })}
@@ -480,6 +383,213 @@
       );
     };
 
+    // ==========================
+    // Feed: CRUD + Comments + Realtime + Image Upload + Reactions
+    // ==========================
+    const Feed = () => {
+      const { user } = useAuth();
+      const [posts, setPosts] = useState([]);
+      const [newPost, setNewPost] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [editingId, setEditingId] = useState(null);
+      const [editingText, setEditingText] = useState('');
+      const [file, setFile] = useState(null);
+      const [uploading, setUploading] = useState(false);
+
+      const authorName = () => (user?.user_metadata?.display_name) || user?.email || 'User';
+
+      const loadPosts = async () => {
+        setLoading(true);
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (error) { showToast(error.message, 'error'); }
+        else { setPosts(data || []); }
+        setLoading(false);
+      };
+
+      useEffect(() => {
+        loadPosts();
+
+        // Realtime: posts
+        const channelPosts = supabaseClient
+          .channel('public:posts')
+          .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'posts' },
+            (payload) => {
+              if (payload.eventType === 'INSERT') {
+                setPosts((prev) => [payload.new, ...prev]);
+              } else if (payload.eventType === 'UPDATE') {
+                setPosts((prev) => prev.map(p => p.id === payload.new.id ? payload.new : p));
+              } else if (payload.eventType === 'DELETE') {
+                setPosts((prev) => prev.filter(p => p.id !== payload.old.id));
+              }
+            }
+          )
+          .subscribe();
+
+        // Realtime: comments
+        const channelComments = supabaseClient
+          .channel('public:comments')
+          .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'comments' },
+            (payload) => {
+              window.dispatchEvent(new CustomEvent('comments-changed', { detail: payload }));
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabaseClient.removeChannel(channelPosts);
+          supabaseClient.removeChannel(channelComments);
+        };
+      }, []);
+
+      const handlePost = async (e) => {
+        e.preventDefault();
+        if (!nonEmpty(newPost) && !file) { showToast('Write something or add a photo.', 'info'); return; }
+        setUploading(true);
+        try {
+          let image_url = null;
+          if (file) {
+            image_url = await uploadPostImage(file, user.id);
+          }
+          const { error } = await supabaseClient.from('posts').insert({
+            author_id: user.id,
+            author_name: authorName(),
+            content: (newPost || '').trim(),
+            image_url
+          });
+          if (error) throw error;
+          showToast('Post created!', 'success');
+          setNewPost('');
+          setFile(null);
+          e.target.reset?.(); // clear file input visually
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+        setUploading(false);
+      };
+
+      const startEdit = (post) => {
+        setEditingId(post.id);
+        setEditingText(post.content || '');
+      };
+
+      const saveEdit = async (id) => {
+        const payload = { content: (editingText || '').trim() };
+        const { error } = await supabaseClient.from('posts').update(payload).eq('id', id);
+        if (error) showToast(error.message, 'error');
+        else { showToast('Post updated!', 'success'); setEditingId(null); setEditingText(''); }
+      };
+
+      const cancelEdit = () => { setEditingId(null); setEditingText(''); };
+
+      const deletePost = async (id) => {
+        if (!confirm('Delete this post?')) return;
+        const { error } = await supabaseClient.from('posts').delete().eq('id', id);
+        if (error) showToast(error.message, 'error');
+        else showToast('Post deleted', 'success');
+      };
+
+      return (
+        <div className="max-w-2xl mx-auto">
+          {/* Post Composer */}
+          <div className="post-card rounded-2xl p-6 mb-6">
+            <form onSubmit={handlePost}>
+              <textarea
+                value={newPost}
+                onChange={(e) => setNewPost(e.target.value)}
+                placeholder="What's on your mind?"
+                className="w-full bg-transparent text-white placeholder-white/50 resize-none focus:outline-none text-lg"
+                rows="3"
+              />
+              <div className="mt-3 flex items-center gap-3">
+                <label className="cursor-pointer inline-flex items-center px-3 py-2 rounded-lg bg-white/10 text-white border border-white/20 hover:bg-white/20">
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                  📷 <span className="ml-2">{file ? file.name : 'Add Photo'}</span>
+                </label>
+                <div className="flex-1"></div>
+                <button type="submit" disabled={uploading}
+                  className="btn-primary px-6 py-2 rounded-lg text-white font-medium disabled:opacity-50">
+                  {uploading ? 'Uploading…' : 'Post'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Posts */}
+          {loading ? (
+            <div className="text-white/80 text-center">Loading posts…</div>
+          ) : posts.length === 0 ? (
+            <div className="post-card rounded-2xl p-6 mb-6 text-center text-white/80">
+              No posts yet. Be the first! 🎉
+            </div>
+          ) : (
+            posts.map(post => (
+              <div key={post.id} className="post-card rounded-2xl p-6 mb-6">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                    <span className="text-white font-bold text-sm">
+                      {(post.author_name || 'U').charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-white font-medium break-all">{post.author_name || 'User'}</p>
+                    <p className="text-white/50 text-sm">{fmtTime(post.created_at)}</p>
+                  </div>
+                </div>
+
+                {/* Image */}
+                {post.image_url && (
+                  <div className="mb-3">
+                    <img loading="lazy" src={post.image_url} alt="Post" className="post-img border border-white/20" />
+                  </div>
+                )}
+
+                {/* Content OR Edit Mode */}
+                {editingId === post.id ? (
+                  <div className="mb-3">
+                    <textarea
+                      value={editingText}
+                      onChange={(e) => setEditingText(e.target.value)}
+                      className="w-full bg-white/10 border border-white/20 rounded-lg text-white p-3"
+                      rows="3"
+                    />
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => saveEdit(post.id)} className="px-4 py-2 rounded-lg bg-green-500 text-white">Save</button>
+                      <button onClick={cancelEdit} className="px-4 py-2 rounded-lg bg-gray-500/50 text-white">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-white text-lg mb-2 whitespace-pre-wrap break-words">{post.content}</p>
+                )}
+
+                {/* Reactions */}
+                <ReactionBar postId={post.id} currentUserId={user?.id} />
+
+                {/* Owner actions */}
+                {user?.id === post.author_id && editingId !== post.id && (
+                  <div className="flex items-center gap-4 my-3">
+                    <button onClick={() => startEdit(post)} className="text-blue-300 hover:text-blue-200">Edit</button>
+                    <button onClick={() => deletePost(post.id)} className="text-red-300 hover:text-red-200">Delete</button>
+                  </div>
+                )}
+
+                {/* Comments */}
+                <Comments postId={post.id} />
+              </div>
+            ))
+          )}
+        </div>
+      );
+    };
+
+    // ==========================
+    // Comments: CRUD + Realtime
+    // ==========================
     const Comments = ({ postId }) => {
       const { user } = useAuth();
       const [comments, setComments] = useState([]);
@@ -487,7 +597,7 @@
       const [editingId, setEditingId] = useState(null);
       const [editingText, setEditingText] = useState('');
 
-      const authorName = () => (user?.user_metadata?.display_name) || user?.email?.split('@')[0] || 'User';
+      const authorName = () => (user?.user_metadata?.display_name) || user?.email || 'User';
 
       const load = async () => {
         const { data, error } = await supabaseClient
@@ -499,9 +609,9 @@
         else setComments(data || []);
       };
 
-      useEffect(() => { 
-        load(); 
-        
+      useEffect(() => { load(); }, [postId]);
+
+      useEffect(() => {
         const handler = (ev) => {
           const payload = ev.detail;
           if (payload.table !== 'comments') return;
@@ -592,6 +702,7 @@
             </div>
           )}
 
+          {/* Add comment */}
           <form onSubmit={addComment} className="flex gap-2">
             <input
               type="text"
@@ -608,146 +719,210 @@
       );
     };
 
-    const Feed = () => {
+    // ==========================
+    // Chat (DB-backed + realtime)
+    // ==========================
+    const Chat = () => {
       const { user } = useAuth();
-      const [posts, setPosts] = useState([]);
-      const [newPost, setNewPost] = useState('');
-      const [loading, setLoading] = useState(true);
-      const [editingId, setEditingId] = useState(null);
-      const [editingText, setEditingText] = useState('');
-      const [file, setFile] = useState(null);
-      const [uploading, setUploading] = useState(false);
-      const fileInputRef = useRef(null);
+      const [messages, setMessages] = useState([]);
+      const [newMessage, setNewMessage] = useState('');
+      const listRef = useRef(null);
 
-      const authorName = () => (user?.user_metadata?.display_name) || user?.email?.split('@')[0] || 'User';
-
-      const loadPosts = async () => {
-        try {
-          setLoading(true);
-          const { data, error } = await supabaseClient
-            .from('posts')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(100);
-          
-          if (error) { 
-            console.error('Load posts error:', error);
-            showToast('Failed to load posts', 'error'); 
-          } else { 
-            console.log('Loaded posts:', data?.length || 0);
-            setPosts(data || []); 
-          }
-        } catch (err) {
-          console.error('Load posts error:', err);
-          showToast('Failed to load posts', 'error');
-        }
-        setLoading(false);
+      const load = async () => {
+        const { data, error } = await supabaseClient
+          .from('messages')
+          .select('*')
+          .order('created_at', { ascending: true })
+          .limit(500);
+        if (error) { showToast(error.message, 'error'); return; }
+        setMessages(data || []);
+        requestAnimationFrame(() => {
+          listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'instant' });
+        });
       };
 
       useEffect(() => {
-        if (!user) return;
-        
-        loadPosts();
-
-        const channelPosts = supabaseClient
-          .channel('posts_feed')
+        load();
+        const channel = supabaseClient
+          .channel('public:messages')
           .on('postgres_changes',
-            { event: '*', schema: 'public', table: 'posts' },
+            { event: '*', schema: 'public', table: 'messages' },
             (payload) => {
-              console.log('Post change:', payload.eventType, payload);
-              
               if (payload.eventType === 'INSERT') {
-                setPosts((prev) => {
-                  if (prev.some(p => p.id === payload.new.id)) {
-                    return prev;
-                  }
-                  return [payload.new, ...prev];
+                setMessages(prev => [...prev, payload.new]);
+                requestAnimationFrame(() => {
+                  listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
                 });
-              } else if (payload.eventType === 'UPDATE') {
-                setPosts((prev) => prev.map(p => 
-                  p.id === payload.new.id ? payload.new : p
-                ));
               } else if (payload.eventType === 'DELETE') {
-                setPosts((prev) => prev.filter(p => p.id !== payload.old.id));
+                setMessages(prev => prev.filter(m => m.id !== payload.old.id));
+              } else if (payload.eventType === 'UPDATE') {
+                setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new : m));
               }
             }
-          )
-          .subscribe();
+          ).subscribe();
+        return () => supabaseClient.removeChannel(channel);
+      }, []);
 
-        const channelComments = supabaseClient
-          .channel('comments_feed')
-          .on('postgres_changes',
-            { event: '*', schema: 'public', table: 'comments' },
-            (payload) => {
-              console.log('Comment change:', payload.eventType);
-              window.dispatchEvent(new CustomEvent('comments-changed', { detail: payload }));
-            }
-          )
-          .subscribe();
-
-        return () => {
-          supabaseClient.removeChannel(channelPosts);
-          supabaseClient.removeChannel(channelComments);
-        };
-      }, [user]);
-
-      const handlePost = async (e) => {
+      const handleSend = async (e) => {
         e.preventDefault();
-        
-        if (!nonEmpty(newPost) && !file) { 
-          showToast('Write something or add a photo.', 'info'); 
-          return; 
-        }
-        
-        setUploading(true);
-        try {
-          let image_url = null;
-          
-          if (file) {
-            console.log('Uploading image...');
-            image_url = await uploadPostImage(file, user.id);
-            console.log('Image uploaded:', image_url);
-          }
-          
-          const postData = {
-            author_id: user.id,
-            author_name: authorName(),
-            content: (newPost || '').trim(),
-            image_url
-          };
-          
-          console.log('Creating post:', postData);
-          
-          const { data, error } = await supabaseClient
-            .from('posts')
-            .insert(postData)
-            .select()
-            .single();
-          
-          if (error) throw error;
-          
-          console.log('Post created:', data);
-          showToast('Post created!', 'success');
-          
-          setNewPost('');
-          setFile(null);
-          if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-          }
-          
-        } catch (err) {
-          console.error('Post creation error:', err);
-          showToast(err.message || 'Failed to create post', 'error');
-        }
-        setUploading(false);
+        if (!nonEmpty(newMessage)) return;
+        const { error } = await supabaseClient.from('messages').insert({
+          author_id: user.id,
+          author_name: user.user_metadata?.display_name || user.email,
+          content: newMessage.trim()
+        });
+        if (error) showToast(error.message, 'error');
+        else setNewMessage('');
       };
 
-      const startEdit = (post) => {
-        setEditingId(post.id);
-        setEditingText(post.content || '');
+      return (
+        <div className="max-w-4xl mx-auto">
+          <div className="glass rounded-2xl p-6 h-[70vh] mb-4 flex flex-col">
+            <div ref={listRef} className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1">
+              {messages.length === 0 ? (
+                <div className="text-white/70">Welcome to Glassy Social Chat!</div>
+              ) : messages.map(message => (
+                <div key={message.id} className={`rounded-lg p-3 ${message.author_id===user.id ? 'bg-white/20 ml-auto' : 'bg-white/10'}`} style={{maxWidth:'85%'}}>
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-white/90 font-medium break-all">{message.author_name || 'User'}</span>
+                    <span className="text-white/60 text-xs ml-2 whitespace-nowrap">{fmtTime(message.created_at)}</span>
+                  </div>
+                  <p className="text-white break-words">{message.content}</p>
+                </div>
+              ))}
+            </div>
+            <form onSubmit={handleSend} className="flex space-x-3">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder="Type a message..."
+                className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <button type="submit" className="btn-primary px-6 py-2 rounded-lg text-white font-medium">
+                Send
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    };
+
+    // ==========================
+    // Profile (Edit: display_name + bio) — fixed
+    // ==========================
+    const Profile = () => {
+      const { user } = useAuth();
+      const [displayName, setDisplayName] = useState('');
+      const [bio, setBio] = useState('');
+      const [loading, setLoading] = useState(true);
+
+      const load = async () => {
+        if (!user) return;
+        const { data, error } = await supabaseClient
+          .from('profiles').select('*').eq('id', user.id).maybeSingle();
+        if (error) { showToast(error.message, 'error'); setLoading(false); return; }
+        setDisplayName(data?.display_name || (user.email?.split('@')[0] ?? ''));
+        setBio(data?.bio || '');
+        setLoading(false);
       };
 
-      const saveEdit = async (id) => {
-        try {
-          const payload = { content: (editingText || '').trim() };
-          const { error } = await
+      useEffect(() => { load(); }, [user?.id]);
+
+      const save = async () => {
+        const payload = {
+          id: user.id,
+          display_name: (displayName || '').trim(),
+          bio: (bio || '').trim()
+        };
+        const { error } = await supabaseClient.from('profiles').upsert(payload).select().single();
+        if (error) showToast(error.message, 'error');
+        else showToast('Profile updated!', 'success');
+      };
+
+      if (loading) return <div className="text-white/80 text-center">Loading profile…</div>;
+
+      return (
+        <div className="max-w-4xl mx-auto">
+          <div className="glass rounded-2xl p-8">
+            <div className="flex items-center space-x-6 mb-8">
+              <div className="w-24 h-24 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                <span className="text-white font-bold text-3xl">
+                  {(displayName || user?.email || 'U').charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-white mb-2">Edit Profile</h1>
+                <p className="text-white/70">Update your public info</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4">
+              <div>
+                <label className="block text-white/80 mb-1">Display Name</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Your name"
+                />
+              </div>
+              <div>
+                <label className="block text-white/80 mb-1">Bio</label>
+                <textarea
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  rows="4"
+                  placeholder="Tell people about yourself"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button onClick={save} className="btn-primary px-6 py-2 rounded-lg text-white font-medium">
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ==========================
+    // Main App
+    // ==========================
+    const App = () => {
+      const [currentPage, setCurrentPage] = useState('feed');
+      const { user } = useAuth();
+
+      if (!user) { return <LoginForm />; }
+
+      const renderPage = () => {
+        switch (currentPage) {
+          case 'chat': return <Chat />;
+          case 'profile': return <Profile />;
+          default: return <Feed />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4">
+          <div className="max-w-6xl mx-auto">
+            <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} />
+            {renderPage()}
+          </div>
+        </div>
+      );
+    };
+
+    const AppRoot = () => (
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+
+    ReactDOM.render(<AppRoot />, document.getElementById('root'));
+  </script>
+</body>
+</html>
