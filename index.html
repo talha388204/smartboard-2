@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SmartBoardX</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Poppins:wght@600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Topbar -->
+  <header class="topbar glass">
+    <div class="left">
+      <button class="logo-btn" id="goDashboard" title="Dashboard">🧠</button>
+      <input id="boardTitle" class="board-title" type="text" value="Untitled Board" />
+    </div>
+    <div class="center">
+      <button id="prevPage" class="icon-btn" title="Previous page">⟨</button>
+      <div class="page-indicator"><span id="pageIndex">1</span> / <span id="pageCount">1</span></div>
+      <button id="nextPage" class="icon-btn" title="Next page">⟩</button>
+      <button id="addPage" class="pill-btn">+ Add Page</button>
+    </div>
+    <div class="right">
+      <button id="shareBtn" class="share-btn">Share</button>
+      <div id="presence" class="presence"></div>
+      <div class="profile">
+        <img id="userAvatar" class="avatar" alt="avatar" />
+        <button id="authBtn" class="pill-btn">Sign in</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Left Toolbar -->
+  <nav class="leftbar glass">
+    <button class="tool-btn active" data-tool="select" title="Select (V)">🖱️</button>
+    <div class="tool-with-panel">
+      <button class="tool-btn" data-tool="pen" title="Pen (P)">✏️</button>
+      <div class="floating-panel" id="penPanel">
+        <div class="panel-row">
+          <label>Color</label>
+          <input id="penColor" type="color" value="#22D3EE" />
+        </div>
+        <div class="panel-row">
+          <label>Size</label>
+          <input id="penSize" type="range" min="1" max="24" value="4" />
+        </div>
+        <div class="panel-row">
+          <label><input id="penSmooth" type="checkbox" checked /> Smoothing</label>
+        </div>
+        <div class="panel-row">
+          <label><input id="penPressure" type="checkbox" /> Pressure</label>
+        </div>
+      </div>
+    </div>
+    <div class="tool-with-panel">
+      <button class="tool-btn" data-tool="highlighter" title="Highlighter (H)">🖍️</button>
+      <div class="floating-panel" id="highPanel">
+        <div class="panel-row">
+          <label>Color</label>
+          <input id="highColor" type="color" value="#FFEB3B" />
+        </div>
+        <div class="panel-row">
+          <label>Size</label>
+          <input id="highSize" type="range" min="4" max="48" value="16" />
+        </div>
+        <div class="panel-row">
+          <label>Opacity</label>
+          <input id="highAlpha" type="range" min="0.1" max="1" step="0.05" value="0.35" />
+        </div>
+      </div>
+    </div>
+    <button class="tool-btn" data-tool="eraser" title="Eraser (E)">🧽</button>
+    <button class="tool-btn" data-tool="text" title="Text (T)">🔤</button>
+    <button class="tool-btn" data-tool="shapes" title="Shapes (S)">⬛</button>
+    <button class="tool-btn" data-tool="image" title="Image/Media (I)">🖼️</button>
+    <button class="tool-btn" data-tool="sticky" title="Sticky Note (N)">🗒️</button>
+    <button class="tool-btn" data-tool="laser" title="Laser (hold L)">🔴</button>
+    <button class="tool-btn" data-tool="hand" title="Hand/Pan (Space)">✋</button>
+    <button class="tool-btn" id="recordBtn" title="Record Session">⏺</button>
+    <div class="spacer"></div>
+    <button class="tool-btn" id="undoBtn" title="Undo (Ctrl/Cmd+Z)">↶</button>
+    <button class="tool-btn" id="redoBtn" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
+  </nav>
+
+  <!-- Right Sidebar -->
+  <aside class="rightbar glass" id="rightbar">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="layers" title="Layers">🧱</button>
+      <button class="tab-btn" data-tab="pages" title="Pages">🗂️</button>
+      <button class="tab-btn" data-tab="chat" title="Chat/Polls">💬</button>
+      <button class="tab-btn" data-tab="assets" title="Assets">📚</button>
+      <button class="tab-btn" data-tab="settings" title="Settings">⚙️</button>
+    </div>
+    <div class="tab-content" id="tab-layers">
+      <div id="layerList" class="list"></div>
+    </div>
+    <div class="tab-content hidden" id="tab-pages">
+      <div id="pageThumbs" class="thumbs"></div>
+      <button id="addPage2" class="pill-btn small">+ New Page</button>
+    </div>
+    <div class="tab-content hidden" id="tab-chat">
+      <div id="chatList" class="chat-list"></div>
+      <div class="chat-input">
+        <input id="chatMsg" placeholder="Write a message..." />
+        <button id="sendMsg">Send</button>
+      </div>
+    </div>
+    <div class="tab-content hidden" id="tab-assets">
+      <input id="imagePicker" type="file" accept="image/*" />
+      <p class="hint">Drag & drop image on canvas to place.</p>
+    </div>
+    <div class="tab-content hidden" id="tab-settings">
+      <div class="settings-grid">
+        <label><input id="gridToggle" type="checkbox" /> Show grid</label>
+        <label><input id="snapToggle" type="checkbox" /> Snap to grid</label>
+        <label><input id="allowEdit" type="checkbox" /> Allow student edit</label>
+        <label><input id="followPresenter" type="checkbox" /> Follow presenter</label>
+      </div>
+      <button id="exportPNG" class="pill-btn">Quick export PNG</button>
+      <button id="fullscreenBtn" class="pill-btn">Fullscreen</button>
+    </div>
+  </aside>
+
+  <!-- Bottom Toolbar -->
+  <footer class="bottombar glass">
+    <div class="left">
+      <button id="undoBtn2" class="pill-btn">Undo</button>
+      <button id="redoBtn2" class="pill-btn">Redo</button>
+      <button id="clearPage" class="pill-btn danger">Clear Page</button>
+    </div>
+    <div class="center">
+      <button id="fitBtn" class="pill-btn">Fit</button>
+      <div class="zoom">
+        <button id="zoomOut" class="icon-btn">-</button>
+        <span id="zoomLabel">100%</span>
+        <button id="zoomIn" class="icon-btn">+</button>
+      </div>
+    </div>
+    <div class="right">
+      <div class="dropdown">
+        <button id="exportMenu" class="pill-btn">Export ▾</button>
+        <div class="menu hidden" id="exportDropdown">
+          <button data-export="png">PNG</button>
+          <button data-export="svg" disabled>SVG (soon)</button>
+          <button data-export="pdf" disabled>PDF (soon)</button>
+          <button data-export="video" disabled>Video (soon)</button>
+        </div>
+      </div>
+      <button id="helpBtn" class="pill-btn">Help</button>
+    </div>
+  </footer>
+
+  <!-- Canvas Stage -->
+  <main class="stage">
+    <canvas id="board" width="1920" height="1080"></canvas>
+    <div id="textEditor" contenteditable="true" class="text-editor hidden"></div>
+  </main>
+
+  <!-- Share Modal -->
+  <div class="modal hidden" id="shareModal">
+    <div class="modal-body glass">
+      <h3>Share</h3>
+      <label class="row"><input id="toggleEditable" type="checkbox" /> Make editable for viewers</label>
+      <div class="row">
+        <input id="shareLink" readonly />
+        <button id="copyLink">Copy</button>
+      </div>
+      <div class="row">
+        <label>Role</label>
+        <select id="shareRole">
+          <option value="viewer">Viewer</option>
+          <option value="editor">Editor</option>
+          <option value="co-teacher">Co-teacher</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Passcode (optional)</label>
+        <input id="passcode" placeholder="••••" />
+      </div>
+      <div class="row right">
+        <button id="closeShare">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
